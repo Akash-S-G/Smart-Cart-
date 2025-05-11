@@ -25,3 +25,24 @@ An IoT-based smart shopping cart using ESP32-CAM, HX711 load cell, and a Flask A
 ## Getting Started
 
 ### 1. Clone the repo
+git clone https://github.com/Akash-S-G/smart-cart.git
+
+### 2. Flash ESP32-CAM
+See [firmware/README.md](firmware/README.md) for instructions.
+
+### 3. Set up backend
+cd backend
+pip install -r requirements.txt
+python server.py
+
+### 4. Test with web interface
+Open [http://localhost:5000](http://localhost:5000) in your browser.
+
+## Folder Structure
+- `firmware/`: ESP32-CAM code
+- `backend/`: Flask server and AI model
+- `model/`: Trained model files
+- `docs/`: Diagrams and documentation
+
+## License
+MIT
