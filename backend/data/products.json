@@ -1,0 +1,39 @@
+{
+  "products": [
+    {
+      "id": "coca_cola",
+      "name": "Coca Cola",
+      "price": 1.99,
+      "category": "beverages",
+      "image_url": "/images/products/coca_cola.jpg"
+    },
+    {
+      "id": "pepsi",
+      "name": "Pepsi",
+      "price": 1.99,
+      "category": "beverages",
+      "image_url": "/images/products/pepsi.jpg"
+    },
+    {
+      "id": "lays_classic",
+      "name": "Lay's Classic Potato Chips",
+      "price": 3.99,
+      "category": "snacks",
+      "image_url": "/images/products/lays_classic.jpg"
+    },
+    {
+      "id": "doritos_nacho",
+      "name": "Doritos Nacho Cheese",
+      "price": 3.99,
+      "category": "snacks",
+      "image_url": "/images/products/doritos_nacho.jpg"
+    },
+    {
+      "id": "oreo",
+      "name": "Oreo Cookies",
+      "price": 4.99,
+      "category": "snacks",
+      "image_url": "/images/products/oreo.jpg"
+    }
+  ]
+} 

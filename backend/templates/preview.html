@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SmartCart Camera Preview</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .preview {
+            text-align: center;
+            margin: 20px 0;
+        }
+        #camera-feed {
+            max-width: 100%;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .detection {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .connected {
+            color: #28a745;
+        }
+        .disconnected {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SmartCart Camera Preview</h1>
+        <div class="preview">
+            <img id="camera-feed" src="/latest.jpg" alt="Camera Feed">
+        </div>
+        <div class="status" id="status">
+            WebSocket: <span id="websocket-status" class="disconnected">Disconnected</span>
+        </div>
+        <div class="detection" id="detection">
+            No detection yet
+        </div>
+    </div>
+
+    <script>
+        const wsStatus = document.getElementById('websocket-status');
+        const detection = document.getElementById('detection');
+        
+        // WebSocket connection
+        const ws = new WebSocket('ws://localhost:5001');
+        
+        ws.onopen = () => {
+            wsStatus.textContent = 'Connected';
+            wsStatus.className = 'connected';
+        };
+
+        ws.onclose = () => {
+            wsStatus.textContent = 'Disconnected';
+            wsStatus.className = 'disconnected';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (!data.error) {
+                detection.innerHTML = `
+                    Detected: ${data.class}<br>
+                    Confidence: ${(data.confidence * 100).toFixed(1)}%<br>
+                    Cart ID: ${data.cart_id || 'Unknown'}
+                `;
+                refreshImage();
+            }
+        };
+
+        function refreshImage() {
+            const img = document.getElementById('camera-feed');
+            img.src = '/latest.jpg?' + new Date().getTime();
+        }
+
+        // Refresh image every second
+        setInterval(refreshImage, 1000);
+
+        // Reconnect on close
+        ws.onclose = () => {
+            wsStatus.textContent = 'Disconnected - Reconnecting...';
+            wsStatus.className = 'disconnected';
+            setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+        };
+    </script>
+</body>
+</html> 
