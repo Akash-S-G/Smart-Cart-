@@ -87,6 +87,28 @@ const CameraFeed = ({ cartId }) => {
     };
   }, [cartId, addItem]);
 
+  // --- Fetch latest image from backend every 5 seconds ---
+  useEffect(() => {
+    const fetchImage = () => {
+      fetch(`${API_URL}/latest_image`)
+        .then(res => {
+          if (!res.ok) throw new Error('No image');
+          return res.blob();
+        })
+        .then(blob => {
+          if (imageRef.current) {
+            imageRef.current.src = URL.createObjectURL(blob);
+          }
+        })
+        .catch(() => {
+          if (imageRef.current) imageRef.current.src = '';
+        });
+    };
+    fetchImage();
+    const interval = setInterval(fetchImage, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="bg-white p-4 rounded-lg shadow">
       <div className="mb-4">
@@ -131,4 +153,4 @@ const CameraFeed = ({ cartId }) => {
   );
 };
 
-export default CameraFeed; 
+export default CameraFeed;

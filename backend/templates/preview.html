@@ -1,11 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>SmartCart Camera Preview</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartCart Preview</title>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 20px;
+            margin: 0;
+            padding: 20px;
             background-color: #f0f0f0;
         }
         .container {
@@ -14,101 +18,270 @@
             background-color: white;
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         h1 {
             color: #333;
             text-align: center;
+            margin-bottom: 30px;
         }
-        .preview {
+        .preview-container {
             text-align: center;
-            margin: 20px 0;
+            margin-bottom: 20px;
+            display: none;
         }
-        #camera-feed {
+        #preview {
             max-width: 100%;
+            border: 2px solid #ddd;
             border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .status {
             text-align: center;
-            margin: 10px 0;
+            margin-top: 10px;
             padding: 10px;
             border-radius: 5px;
-            background-color: #f8f9fa;
         }
-        .detection {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
         }
-        .connected {
-            color: #28a745;
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
-        .disconnected {
-            color: #dc3545;
+        .login-container {
+            max-width: 400px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .btn {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .user-info {
+            text-align: right;
+            margin-bottom: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>SmartCart Camera Preview</h1>
-        <div class="preview">
-            <img id="camera-feed" src="/latest.jpg" alt="Camera Feed">
+        <div id="user-info" class="user-info" style="display: none;">
+            Welcome, <span id="username"></span>!
+            <button onclick="logout()" class="btn">Logout</button>
         </div>
-        <div class="status" id="status">
-            WebSocket: <span id="websocket-status" class="disconnected">Disconnected</span>
+
+        <div id="login-container" class="login-container">
+            <h1>SmartCart Login</h1>
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username-input" placeholder="Enter username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password-input" placeholder="Enter password">
+            </div>
+            <button onclick="login()" class="btn">Login</button>
+            <div id="login-status" class="status" style="display: none;"></div>
         </div>
-        <div class="detection" id="detection">
-            No detection yet
+
+        <div id="preview-container" class="preview-container">
+            <h1>SmartCart Preview</h1>
+            <div class="preview-container">
+                <img id="preview" src="" alt="Preview will appear here">
+            </div>
+            <div id="status" class="status"></div>
         </div>
     </div>
 
     <script>
-        const wsStatus = document.getElementById('websocket-status');
-        const detection = document.getElementById('detection');
-        
-        // WebSocket connection
-        const ws = new WebSocket('ws://localhost:5001');
-        
-        ws.onopen = () => {
-            wsStatus.textContent = 'Connected';
-            wsStatus.className = 'connected';
-        };
+        let socket = null;
+        let authToken = localStorage.getItem('authToken');
+        const preview = document.getElementById('preview');
+        const status = document.getElementById('status');
+        const loginContainer = document.getElementById('login-container');
+        const previewContainer = document.getElementById('preview-container');
+        const userInfo = document.getElementById('user-info');
+        const usernameSpan = document.getElementById('username');
 
-        ws.onclose = () => {
-            wsStatus.textContent = 'Disconnected';
-            wsStatus.className = 'disconnected';
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (!data.error) {
-                detection.innerHTML = `
-                    Detected: ${data.class}<br>
-                    Confidence: ${(data.confidence * 100).toFixed(1)}%<br>
-                    Cart ID: ${data.cart_id || 'Unknown'}
-                `;
-                refreshImage();
-            }
-        };
-
-        function refreshImage() {
-            const img = document.getElementById('camera-feed');
-            img.src = '/latest.jpg?' + new Date().getTime();
+        // Check if user is already logged in
+        if (authToken) {
+            checkAuth();
         }
 
-        // Refresh image every second
-        setInterval(refreshImage, 1000);
+        async function login() {
+            const username = document.getElementById('username-input').value;
+            const password = document.getElementById('password-input').value;
+            const loginStatus = document.getElementById('login-status');
 
-        // Reconnect on close
-        ws.onclose = () => {
-            wsStatus.textContent = 'Disconnected - Reconnecting...';
-            wsStatus.className = 'disconnected';
-            setTimeout(() => {
-                window.location.reload();
-            }, 5000);
-        };
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    loginStatus.textContent = 'Login successful!';
+                    loginStatus.className = 'status success';
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('username', data.username);
+                    showPreview();
+                } else {
+                    loginStatus.textContent = data.message || 'Login failed';
+                    loginStatus.className = 'status error';
+                }
+                loginStatus.style.display = 'block';
+            } catch (error) {
+                loginStatus.textContent = 'Error connecting to server';
+                loginStatus.className = 'status error';
+                loginStatus.style.display = 'block';
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('username');
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            showLogin();
+        }
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/check-auth', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showPreview();
+                } else {
+                    showLogin();
+                }
+            } catch (error) {
+                showLogin();
+            }
+        }
+
+        function showPreview() {
+            loginContainer.style.display = 'none';
+            previewContainer.style.display = 'block';
+            userInfo.style.display = 'block';
+            usernameSpan.textContent = localStorage.getItem('username');
+            connectWebSocket();
+        }
+
+        function showLogin() {
+            loginContainer.style.display = 'block';
+            previewContainer.style.display = 'none';
+            userInfo.style.display = 'none';
+        }
+
+        function connectWebSocket() {
+            if (socket) {
+                socket.disconnect();
+            }
+
+            try {
+                // Create Socket.IO connection
+                socket = io(`http://{{ server_ip }}:5000`, {
+                    transports: ['websocket'],
+                    upgrade: false,
+                    query: { cart_id: 'cart_001' }, // CHANGED from 'preview_cart' to 'cart_001'
+                    reconnection: true,
+                    reconnectionAttempts: 5,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000
+                });
+
+                socket.on('connect', () => {
+                    console.log('Socket.IO connected');
+                    status.textContent = 'Connected to SmartCart server';
+                    status.className = 'status success';
+                });
+
+                socket.on('disconnect', () => {
+                    console.log('Socket.IO disconnected');
+                    status.textContent = 'Disconnected from server';
+                    status.className = 'status error';
+                });
+
+                socket.on('connect_error', (error) => {
+                    console.error('Socket.IO connection error:', error);
+                    status.textContent = 'Error connecting to server';
+                    status.className = 'status error';
+                });
+
+                socket.on('frame_update', (data) => {
+                    try {
+                        if (data.frame) {
+                            preview.src = `data:image/jpeg;base64,${data.frame}`;
+                            status.textContent = 'Frame updated';
+                            status.className = 'status success';
+                        } else if (data.error) {
+                            status.textContent = `Error: ${data.error}`;
+                            status.className = 'status error';
+                        }
+                    } catch (error) {
+                        console.error('Error processing message:', error);
+                        status.textContent = 'Error processing server response';
+                        status.className = 'status error';
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error creating Socket.IO connection:', error);
+                status.textContent = 'Failed to create WebSocket connection';
+                status.className = 'status error';
+            }
+        }
+
+        // Handle Enter key in login form
+        document.getElementById('username-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('password-input').focus();
+            }
+        });
+
+        document.getElementById('password-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
     </script>
 </body>
-</html> 
+</html>

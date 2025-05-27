@@ -29,6 +29,7 @@ import CameraManagement from './pages/admin/CameraManagement';
 import UserManagement from './pages/admin/UserManagement';
 import Analytics from './pages/admin/Analytics';
 
+// import Product from './Product';
 function App() {
   const isAuthenticated = useAuthStore(state => state.isAuthenticated);
   const user = useAuthStore(state => state.user);
@@ -79,6 +80,7 @@ function App() {
             <Route path="/admin/cameras" element={<AdminRoute><Layout><CameraManagement /></Layout></AdminRoute>} />
             <Route path="/admin/users" element={<AdminRoute><Layout><UserManagement /></Layout></AdminRoute>} />
             <Route path="/admin/analytics" element={<AdminRoute><Layout><Analytics /></Layout></AdminRoute>} />
+          
           </Routes>
         </main>
       </div>

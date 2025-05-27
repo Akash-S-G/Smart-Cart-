@@ -1,24 +1,22 @@
 #include <WiFi.h>
 #include <esp_camera.h>
-#include <WebSocketsClient.h>
 #include <base64.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 
 // WiFi credentials
-const char* ssid = "White Devil";
-const char* password = "Abhi@1771";
+const char* ssid = "moto";
+const char* password = "12345679";
 
 // Server configuration
-const char* server_ip = "192.168.74.207";
-const int server_port = 5000;
+const char* server_ip = "192.168.228.77"; // <-- your PC's IP
+const int server_port = 5000;              // <-- port for server.py
 const char* server_path = "/socket.io/?EIO=4&transport=websocket";
 
 // Cart configuration
-const char* cart_id = "cart_001"; // Unique identifier for this cart
+const char* cart_id = "cart_001";
 unsigned long lastSend = 0;
-unsigned long interval = 1000; // Send image every 1 second
-
-WebSocketsClient webSocket;
+unsigned long interval = 1000;  // 1 second
 
 // Camera pins for AI Thinker ESP32-CAM board
 #define PWDN_GPIO_NUM     32
@@ -38,7 +36,6 @@ WebSocketsClient webSocket;
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-// LED Flash control
 #define FLASH_GPIO_NUM 4
 bool flashEnabled = false;
 
@@ -64,20 +61,18 @@ void startCamera() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA; // Higher resolution for better detection
-  config.jpeg_quality = 10; // Lower value means higher quality
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 10;
   config.fb_count = 1;
 
-  // Initialize camera
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    Serial.printf("Camera init failed with error 0x%x\n", err);
     return;
   }
 
-  // Configure flash LED
   pinMode(FLASH_GPIO_NUM, OUTPUT);
-  digitalWrite(FLASH_GPIO_NUM, LOW); // Flash off by default
+  digitalWrite(FLASH_GPIO_NUM, LOW);
 }
 
 void toggleFlash(bool enable) {
@@ -85,79 +80,50 @@ void toggleFlash(bool enable) {
   digitalWrite(FLASH_GPIO_NUM, enable ? HIGH : LOW);
 }
 
-void sendImage() {
-  if (!webSocket.isConnected()) {
-    Serial.println("WebSocket not connected");
+// --- Single-image prediction HTTP POST function ---
+void sendImageForPrediction() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected. Cannot send image for prediction.");
     return;
   }
 
-  // Get frame buffer
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("Camera capture failed");
     return;
   }
 
-  // Create JSON document
-  JsonDocument doc;
-  doc["type"] = "esp32_frame";
-  doc["cart_id"] = cart_id;
-  
-  // Convert image to base64
   String imageBase64 = base64::encode(fb->buf, fb->len);
-  doc["image"] = imageBase64;
-
-  // Serialize JSON to string
-  String jsonString;
-  serializeJson(doc, jsonString);
-
-  // Send the data
-  webSocket.sendTXT(jsonString);
-
-  // Return the frame buffer
   esp_camera_fb_return(fb);
-}
 
-void sendCartConnectMessage() {
-  JsonDocument doc;
-  doc["type"] = "cart_connect";
+  // Prepare JSON payload
+  DynamicJsonDocument doc(16384);
   doc["cart_id"] = cart_id;
+  doc["image_base64"] = imageBase64;
   String jsonString;
   serializeJson(doc, jsonString);
-  webSocket.sendTXT(jsonString);
-}
 
-void handleSocketIOEvent(WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
-    case WStype_DISCONNECTED:
-      Serial.println("Disconnected from server");
-      break;
-    
-    case WStype_CONNECTED:
-      Serial.println("Connected to server");
-      sendCartConnectMessage();
-      break;
-    
-    case WStype_TEXT: {
-      // Handle incoming messages
-      String message = String((char*)payload);
-      if (message.indexOf("flash_on") >= 0) {
-        toggleFlash(true);
-      } else if (message.indexOf("flash_off") >= 0) {
-        toggleFlash(false);
-      }
-      break;
-    }
+  HTTPClient http;
+  String url = String("http://") + server_ip + ":" + String(server_port) + "/predict_product";
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(jsonString);
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.print("[Prediction] Response: ");
+    Serial.println(response);
+  } else {
+    Serial.print("[Prediction] Error on sending POST: ");
+    Serial.println(httpResponseCode);
   }
+  http.end();
 }
 
 void setup() {
   Serial.begin(115200);
-
-  // Initialize camera
   startCamera();
 
-  // Connect to WiFi
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
@@ -167,28 +133,27 @@ void setup() {
   Serial.println("\nConnected to WiFi");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
-
-  // Configure WebSocket
-  webSocket.begin(server_ip, server_port, server_path);
-  webSocket.onEvent(handleSocketIOEvent);
-  webSocket.setReconnectInterval(5000);
-  
-  // Enable auto-reconnect
-  webSocket.enableHeartbeat(15000, 3000, 2);
 }
 
 void loop() {
-  webSocket.loop();
+  static unsigned long lastWiFiCheck = 0;
+  unsigned long currentMillis = millis();
+  const unsigned long WIFI_CHECK_INTERVAL = 5000;
 
-  // Send image periodically if connected
-  if (millis() - lastSend > interval && webSocket.isConnected()) {
-    sendImage();
-    lastSend = millis();
+  // Reconnect WiFi if disconnected
+  if (currentMillis - lastWiFiCheck > WIFI_CHECK_INTERVAL) {
+    lastWiFiCheck = currentMillis;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi disconnected. Reconnecting...");
+      WiFi.begin(ssid, password);
+    }
   }
 
-  // Check WiFi connection
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected. Reconnecting...");
-    WiFi.begin(ssid, password);
+  // --- Send image for prediction every 5 seconds (example) ---
+  static unsigned long lastPrediction = 0;
+  const unsigned long predictionInterval = 5000; // 5 seconds
+  if (WiFi.status() == WL_CONNECTED && currentMillis - lastPrediction > predictionInterval) {
+    sendImageForPrediction();
+    lastPrediction = currentMillis;
   }
-} 
+}
