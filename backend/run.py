@@ -20,6 +20,10 @@ import os
 import json
 import threading
 import requests
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -123,6 +127,7 @@ latest_prediction_lock = threading.Lock()
 def call_gemini_api(image_b64):
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
+        logger.error('GEMINI_API_KEY not set!')
         return None
     url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=' + api_key
     headers = {'Content-Type': 'application/json'}
@@ -138,6 +143,7 @@ def call_gemini_api(image_b64):
     }
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=8)
+        logger.info(f'[Gemini API] Status: {resp.status_code}, Response: {resp.text}')
         resp.raise_for_status()
         data = resp.json()
         # Parse Gemini response for product_name and confidence
@@ -151,6 +157,8 @@ def call_gemini_api(image_b64):
                 'confidence': float(result.get('confidence', 0)),
                 'source': 'gemini'
             }
+        else:
+            logger.error(f'[Gemini API] No JSON found in response text: {text}')
     except Exception as e:
         logger.error(f'Gemini API error: {e}')
     return None
@@ -196,7 +204,7 @@ def predict_product():
         model = tf.keras.models.load_model(model_path)
         predictions = model.predict(img_resized)[0]
         max_pred_idx = int(np.argmax(predictions))
-        confidence_local = float(predictions[max_pred_idx])
+        confidence_local = float(predictions[max_pred_idx] ) 
         class_indices_path = os.path.join(os.path.dirname(__file__), '..', 'ml_models', 'training', 'class_indices.json')
         with open(class_indices_path, 'r') as f:
             class_indices = json.load(f)

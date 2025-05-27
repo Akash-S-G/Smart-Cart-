@@ -61,17 +61,6 @@ const CameraFeed = ({ cartId }) => {
       console.log('Detection result:', data);
       if (data.cart_id === cartId) {
         setLastDetection(data);
-
-        // Add detected product to cart
-        const product = {
-          id: data.class,
-          name: data.class,
-          price: 0,
-          confidence: data.confidence
-        };
-
-        addItem(product);
-        toast.success(`Detected: ${product.name}`);
       }
     });
 
@@ -125,6 +114,21 @@ const CameraFeed = ({ cartId }) => {
           console.log('[CameraFeed] /latest_prediction response:', data); // Debug log
           if (data && typeof data.confidence !== 'undefined' && data.product_name) {
             setLastDetection(data);
+            // Only add to cart if product is recognized and confidence >= 0.85
+            if (
+              data.product_name !== 'Unknown or Not Recognized' &&
+              typeof data.confidence === 'number' &&
+              data.confidence >= 0.85
+            ) {
+              const price = Math.floor(Math.random() * 100) + 1; // random price 1-100
+              addItem({
+                id: data.product_id,
+                name: data.product_name,
+                price,
+                confidence: data.confidence
+              });
+              toast.success(`Added to cart: ${data.product_name} (₹${price})`);
+            }
           }
         })
         .catch(() => { });
@@ -132,7 +136,7 @@ const CameraFeed = ({ cartId }) => {
     fetchPrediction();
     const interval = setInterval(fetchPrediction, 1000); // 1 second
     return () => clearInterval(interval);
-  }, [cartId,]);
+  }, [cartId, addItem]);
 
   return (
     <div className="bg-white p-4 rounded-lg shadow">
