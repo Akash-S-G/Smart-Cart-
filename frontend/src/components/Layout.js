@@ -120,7 +120,7 @@ const Layout = ({ children }) => {
               Terms
             </Link>
           </div>
-          <div className="mt-8 md:mt-0 md:order-1">
+          <div className="mt-10 md:mt-0 md:order-1">
             <p className="text-center text-base text-gray-400">
               &copy; {new Date().getFullYear()} Smart Cart AI. All rights reserved.
             </p>

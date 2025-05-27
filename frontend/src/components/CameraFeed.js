@@ -7,7 +7,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://192.168.74.207:5000';
 
 const CameraFeed = ({ cartId }) => {
   const [isConnected, setIsConnected] = useState(false);
-  const [lastDetection, setLastDetection] = useState(null);
+  const [lastDetection, setLastDetection] = useState(0);
   const socketRef = useRef(null);
   const imageRef = useRef(null);
   const addItem = useCartStore(state => state.addItem);
@@ -87,17 +87,21 @@ const CameraFeed = ({ cartId }) => {
     };
   }, [cartId, addItem]);
 
-  // --- Fetch latest image from backend every 5 seconds ---
+  // --- Fetch latest image from backend every 1 second ---
   useEffect(() => {
+    let lastImageUrl = null;
     const fetchImage = () => {
-      fetch(`${API_URL}/latest_image`)
+      fetch(`${API_URL}/latest_image?_t=${Date.now()}`)
         .then(res => {
           if (!res.ok) throw new Error('No image');
           return res.blob();
         })
         .then(blob => {
           if (imageRef.current) {
-            imageRef.current.src = URL.createObjectURL(blob);
+            // Revoke previous object URL to avoid memory leak
+            if (lastImageUrl) URL.revokeObjectURL(lastImageUrl);
+            lastImageUrl = URL.createObjectURL(blob);
+            imageRef.current.src = lastImageUrl;
           }
         })
         .catch(() => {
@@ -105,9 +109,30 @@ const CameraFeed = ({ cartId }) => {
         });
     };
     fetchImage();
-    const interval = setInterval(fetchImage, 5000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchImage, 500); // 0.5 second for faster updates
+    return () => {
+      clearInterval(interval);
+      if (lastImageUrl) URL.revokeObjectURL(lastImageUrl);
+    };
   }, []);
+
+  // --- Fetch latest prediction from backend every 1 second ---
+  useEffect(() => {
+    const fetchPrediction = () => {
+      fetch(`${API_URL}/latest_prediction`)
+        .then(res => res.json())
+        .then(data => {
+          console.log('[CameraFeed] /latest_prediction response:', data); // Debug log
+          if (data && typeof data.confidence !== 'undefined' && data.product_name) {
+            setLastDetection(data);
+          }
+        })
+        .catch(() => { });
+    };
+    fetchPrediction();
+    const interval = setInterval(fetchPrediction, 1000); // 1 second
+    return () => clearInterval(interval);
+  }, [cartId,]);
 
   return (
     <div className="bg-white p-4 rounded-lg shadow">
@@ -115,15 +140,26 @@ const CameraFeed = ({ cartId }) => {
         <h2 className="text-xl font-semibold mb-2">Camera Feed</h2>
         <div className="flex items-center space-x-2">
           <div
-            className={`w-3 h-3 rounded-full ${
-              isConnected ? 'bg-green-500' : 'bg-red-500'
-            }`}
+            className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
           />
           <span className="text-sm text-gray-600">
             {isConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
       </div>
+
+      {/* Move Last Prediction above the camera feed and remove mb-10 */}
+      {lastDetection && (
+        <div className="p-4 bg-blue-50 rounded-lg mb-4">
+          <h3 className="font-medium mb-1">Last Prediction</h3>
+          <div className="text-sm text-gray-600">
+            <p>Product: {lastDetection.product_name || 'N/A'}</p>
+            <p>Confidence: {typeof lastDetection.confidence === 'number' && !isNaN(lastDetection.confidence)
+              ? (lastDetection.confidence * 100).toFixed(1) + '%'
+              : 'N/A'}</p>
+          </div>
+        </div>
+      )}
 
       <div className="relative aspect-video bg-gray-100 rounded-lg overflow-hidden mb-4">
         <img
@@ -137,18 +173,6 @@ const CameraFeed = ({ cartId }) => {
           </div>
         )}
       </div>
-
-      {lastDetection && (
-        <div className="p-3 bg-blue-50 rounded-lg">
-          <h3 className="font-medium mb-1">Last Detection</h3>
-          <div className="text-sm text-gray-600">
-            <p>Product: {lastDetection.class}</p>
-            <p>
-              Confidence: {(lastDetection.confidence * 100).toFixed(1)}%
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

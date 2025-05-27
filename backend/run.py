@@ -19,6 +19,7 @@ import sys
 import os
 import json
 import threading
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -114,9 +115,65 @@ os.makedirs(RECEIVED_IMAGE_DIR, exist_ok=True)
 latest_image_path = os.path.join(RECEIVED_IMAGE_DIR, 'latest.jpg')
 latest_image_lock = threading.Lock()
 
+# Store the latest prediction result
+default_prediction = {'product_id': None, 'product_name': None, 'confidence': None, 'cart_id': None}
+latest_prediction = default_prediction.copy()
+latest_prediction_lock = threading.Lock()
+
+def call_gemini_api(image_b64):
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return None
+    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=' + api_key
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": "What product is in this image? Return a JSON with product_name and confidence (0-1)."},
+                    {"inlineData": {"mimeType": "image/jpeg", "data": image_b64}}
+                ]
+            }
+        ]
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        # Parse Gemini response for product_name and confidence
+        text = data['candidates'][0]['content']['parts'][0]['text']
+        import re, json as pyjson
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = pyjson.loads(match.group(0))
+            return {
+                'product_name': result.get('product_name'),
+                'confidence': float(result.get('confidence', 0)),
+                'source': 'gemini'
+            }
+    except Exception as e:
+        logger.error(f'Gemini API error: {e}')
+    return None
+
+def async_gemini_update(image_b64, cart_id, confidence_local):
+    gemini_result = call_gemini_api(image_b64)
+    if gemini_result and gemini_result['confidence'] > confidence_local:
+        best_result = {
+            'cart_id': cart_id,
+            'product_id': None,
+            'product_name': gemini_result['product_name'],
+            'confidence': gemini_result['confidence']
+            # 'source' removed
+        }
+        with latest_prediction_lock:
+            latest_prediction.update(best_result)
+        logger.info(f"[Async Gemini] Updated prediction: {best_result['product_name']} | Confidence: {best_result['confidence']:.3f} | Source: gemini")
+
 @app.route('/predict_product', methods=['POST'])
 def predict_product():
     try:
+        import time as _time
+        start_time = _time.time()
         data = request.get_json()
         cart_id = data.get('cart_id')
         image_b64 = data.get('image_base64') or data.get('image')
@@ -129,32 +186,36 @@ def predict_product():
         # Save the image as latest.jpg (thread-safe)
         with latest_image_lock:
             cv2.imwrite(latest_image_path, img)
-        # Preprocess for model
+        # --- Local model prediction ---
         img_resized = cv2.resize(img, (224, 224))
         img_resized = img_resized / 255.0
         img_resized = np.expand_dims(img_resized, axis=0)
-        # Load model (robust path)
         model_path = os.path.join(os.path.dirname(__file__), '..', 'ml_models', 'weights', 'product_model3_finetuned.h5')
         model_path = os.path.abspath(model_path)
         import tensorflow as tf
         model = tf.keras.models.load_model(model_path)
         predictions = model.predict(img_resized)[0]
         max_pred_idx = int(np.argmax(predictions))
-        confidence = float(predictions[max_pred_idx])
-        # Load class indices
+        confidence_local = float(predictions[max_pred_idx])
         class_indices_path = os.path.join(os.path.dirname(__file__), '..', 'ml_models', 'training', 'class_indices.json')
         with open(class_indices_path, 'r') as f:
             class_indices = json.load(f)
-        # Reverse mapping: index (as int) -> class name
         idx_to_class = {int(v): k for k, v in class_indices.items()}
-        product_name = idx_to_class.get(max_pred_idx, f'class_{max_pred_idx}')
-        result = {
+        product_name_local = idx_to_class.get(max_pred_idx, 'Unknown or Not Recognized')
+        local_result = {
             'cart_id': cart_id,
-            'product_id': max_pred_idx,  # Numeric class index
-            'product_name': product_name,  # Human-readable class name from class_indices.json
-            'confidence': confidence
+            'product_id': max_pred_idx,
+            'product_name': product_name_local,
+            'confidence': confidence_local
         }
-        return jsonify(result)
+        # Store the local prediction immediately
+        with latest_prediction_lock:
+            latest_prediction.update(local_result)
+        elapsed = _time.time() - start_time
+        logger.info(f"Predicted product: {local_result['product_name']} | Confidence: {local_result['confidence']:.3f} | Source: local | Time: {elapsed:.2f}s")
+        # Start Gemini API call in a background thread
+        threading.Thread(target=async_gemini_update, args=(image_b64, cart_id, confidence_local), daemon=True).start()
+        return jsonify(local_result)
     except Exception as e:
         logger.error(f'/predict_product error: {str(e)}')
         return jsonify({'error': str(e)}), 500
@@ -166,6 +227,14 @@ def latest_image():
         return send_file(latest_image_path, mimetype='image/jpeg')
     else:
         return jsonify({'error': 'No image available'}), 404
+
+@app.route('/latest_prediction', methods=['GET'])
+def get_latest_prediction():
+    with latest_prediction_lock:
+        if latest_prediction['product_id'] is not None:
+            return jsonify(latest_prediction)
+        else:
+            return jsonify({'error': 'No prediction available'}), 404
 
 # --- AUTHENTICATION HANDLER FOR ESP32 ---
 @socketio.on('authenticate')

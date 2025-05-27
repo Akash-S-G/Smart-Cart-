@@ -44,9 +44,7 @@ const CameraTab = () => {
         <div className="mt-4">
           <div className="flex items-center space-x-2">
             <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-sm text-gray-600">
-              {isConnected ? 'Camera Connected' : 'Camera Disconnected'}
-            </span>
+            {/* Removed Camera Connected/Disconnected text */}
           </div>
         </div>
       </div>
@@ -54,4 +52,4 @@ const CameraTab = () => {
   );
 };
 
-export default CameraTab; 
+export default CameraTab;
