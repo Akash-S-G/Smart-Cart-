@@ -2,7 +2,9 @@ import eventlet
 # Disable eventlet DNS monkey patching to fix Gemini API DNS errors on Windows
 # See: https://github.com/eventlet/eventlet/issues/401
 # This allows requests to use the system DNS resolver
-eventlet.monkey_patch()
+# eventlet.monkey_patch(dns=False)
+# import eventlet
+# eventlet.patcher.monkey_patch_all(socket=True, select=True, time=True, thread=True, os=True)
 
 
 from flask import Flask, request, jsonify, send_file
@@ -132,13 +134,14 @@ def call_gemini_api(image_b64):
     if not api_key:
         logger.error('GEMINI_API_KEY not set!')
         return None
-    url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=' + api_key
+    # Use the new Gemini model endpoint
+    url = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=' + api_key
     headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [
             {
                 "parts": [
-                    {"text": "What product is in this image? Return a JSON with product_name and confidence (0-1)."},
+                    {"text": "What product is in this image?think only about products in any shopping store or grocery items  Return a JSON with product_name and confidence (0-1)."},
                     {"inlineData": {"mimeType": "image/jpeg", "data": image_b64}}
                 ]
             }

@@ -38,22 +38,63 @@ const CameraFeed = ({ cartId }) => {
   // --- Webcam prediction logic ---
   useEffect(() => {
     if (!useWebcam) return;
-    let interval;
-    const captureAndPredict = async () => {
-      if (!videoRef.current) return;
+    let stopped = false;
+    let lastPredictTime = 0;
+    const lastFrameHashes = [];
+    // Simple average color hash function
+    function getFrameHash(ctx, width, height) {
+      const imgData = ctx.getImageData(0, 0, width, height).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < imgData.length; i += 4) {
+        r += imgData[i];
+        g += imgData[i + 1];
+        b += imgData[i + 2];
+      }
+      const n = imgData.length / 4;
+      return `${Math.round(r / n)}-${Math.round(g / n)}-${Math.round(b / n)}`;
+    }
+    // Live video display (no lag)
+    const displayFrame = () => {
+      if (stopped || !videoRef.current) return;
+      // Just keep the video playing, no need to draw to canvas for display
+      requestAnimationFrame(displayFrame);
+    };
+    // Prediction throttled
+    const predictFrame = async () => {
+      if (stopped || !videoRef.current) return;
+      const now = Date.now();
+      if (now - lastPredictTime < 400) {
+        setTimeout(predictFrame, 100); // check again soon
+        return;
+      }
+      lastPredictTime = now;
       const video = videoRef.current;
+      if (video.readyState < 2) {
+        setTimeout(predictFrame, 100);
+        return;
+      }
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth || 224;
       canvas.height = video.videoHeight || 224;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const frameHash = getFrameHash(ctx, canvas.width, canvas.height);
+      if (lastFrameHashes.includes(frameHash)) {
+        setTimeout(predictFrame, 100);
+        return;
+      }
+      lastFrameHashes.push(frameHash);
+      if (lastFrameHashes.length > 3) lastFrameHashes.shift();
       const dataUrl = canvas.toDataURL('image/jpeg');
       const base64 = dataUrl.split(',')[1];
       try {
+        // --- OpenAI API integration placeholder ---
+        // For security, call OpenAI API from backend, not frontend.
+        // Here, we just send to /predict_product as before.
         const res = await fetch(`${API_URL}/predict_product`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cart_id: cartId, image_base64: base64 })
+          body: JSON.stringify({ cart_id: cartId, image_base64: base64, use_openai: true }) // pass flag to backend
         });
         const data = await res.json();
         if (data && typeof data.confidence !== 'undefined' && data.product_name) {
@@ -89,9 +130,11 @@ const CameraFeed = ({ cartId }) => {
       } catch (e) {
         // ignore
       }
+      setTimeout(predictFrame, 100); // keep predicting
     };
-    interval = setInterval(captureAndPredict, 1000);
-    return () => clearInterval(interval);
+    requestAnimationFrame(displayFrame);
+    setTimeout(predictFrame, 0);
+    return () => { stopped = true; };
   }, [useWebcam, cartId, addItem, lastAddedProduct]);
 
   // --- ESP32 polling logic ---
