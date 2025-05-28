@@ -1,22 +1,25 @@
 #include <WiFi.h>
 #include <esp_camera.h>
+#include <WebSocketsClient.h>
 #include <base64.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
 
 // WiFi credentials
+// const char* ssid = "Preetham.V";
+// const char* password = "dkzn7849";
 const char* ssid = "moto";
 const char* password = "12345679";
-
 // Server configuration
 const char* server_ip = "192.168.228.77"; // <-- your PC's IP
-const int server_port = 5000;              // <-- port for server.py
+const int server_port = 5000;             // <-- port for server.py
+// const char* server_path = "/";            // <-- plain WebSocket
 const char* server_path = "/socket.io/?EIO=4&transport=websocket";
-
 // Cart configuration
 const char* cart_id = "cart_001";
 unsigned long lastSend = 0;
-unsigned long interval = 1000;  // 1 second
+unsigned long interval = 1000; // 1 second
+
+WebSocketsClient webSocket;
 
 // Camera pins for AI Thinker ESP32-CAM board
 #define PWDN_GPIO_NUM     32
@@ -80,10 +83,9 @@ void toggleFlash(bool enable) {
   digitalWrite(FLASH_GPIO_NUM, enable ? HIGH : LOW);
 }
 
-// --- Single-image prediction HTTP POST function ---
-void sendImageForPrediction() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected. Cannot send image for prediction.");
+void sendImage() {
+  if (!webSocket.isConnected()) {
+    Serial.println("WebSocket not connected");
     return;
   }
 
@@ -93,31 +95,51 @@ void sendImageForPrediction() {
     return;
   }
 
-  String imageBase64 = base64::encode(fb->buf, fb->len);
-  esp_camera_fb_return(fb);
-
-  // Prepare JSON payload
-  DynamicJsonDocument doc(16384);
+  JsonDocument doc;
+  doc["type"] = "esp32_frame";
   doc["cart_id"] = cart_id;
-  doc["image_base64"] = imageBase64;
+  String imageBase64 = base64::encode(fb->buf, fb->len);
+  doc["image"] = imageBase64;
+
   String jsonString;
   serializeJson(doc, jsonString);
 
-  HTTPClient http;
-  String url = String("http://") + server_ip + ":" + String(server_port) + "/predict_product";
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
+  Serial.println("Sending image frame...");
+  webSocket.sendTXT(jsonString);
 
-  int httpResponseCode = http.POST(jsonString);
-  if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.print("[Prediction] Response: ");
-    Serial.println(response);
-  } else {
-    Serial.print("[Prediction] Error on sending POST: ");
-    Serial.println(httpResponseCode);
+  esp_camera_fb_return(fb);
+}
+
+void sendCartConnectMessage() {
+  JsonDocument doc;
+  doc["type"] = "cart_connect";
+  doc["cart_id"] = cart_id;
+  String jsonString;
+  serializeJson(doc, jsonString);
+  webSocket.sendTXT(jsonString);
+}
+
+void handleWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+  switch(type) {
+    case WStype_DISCONNECTED:
+      Serial.println("Disconnected from server");
+      break;
+    case WStype_CONNECTED:
+      Serial.println("Connected to server");
+      sendCartConnectMessage();
+      break;
+    case WStype_TEXT: {
+      String message = String((char*)payload);
+      if (message.indexOf("flash_on") >= 0) {
+        toggleFlash(true);
+      } else if (message.indexOf("flash_off") >= 0) {
+        toggleFlash(false);
+      }
+      break;
+    }
+    default:
+      break;
   }
-  http.end();
 }
 
 void setup() {
@@ -133,27 +155,23 @@ void setup() {
   Serial.println("\nConnected to WiFi");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
+
+  webSocket.begin(server_ip, server_port, server_path);
+  webSocket.onEvent(handleWebSocketEvent);
+  webSocket.setReconnectInterval(5000);
+  webSocket.enableHeartbeat(15000, 3000, 2);
 }
 
 void loop() {
-  static unsigned long lastWiFiCheck = 0;
-  unsigned long currentMillis = millis();
-  const unsigned long WIFI_CHECK_INTERVAL = 5000;
+  webSocket.loop();
 
-  // Reconnect WiFi if disconnected
-  if (currentMillis - lastWiFiCheck > WIFI_CHECK_INTERVAL) {
-    lastWiFiCheck = currentMillis;
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("WiFi disconnected. Reconnecting...");
-      WiFi.begin(ssid, password);
-    }
+  if (millis() - lastSend > interval && webSocket.isConnected()) {
+    sendImage();
+    lastSend = millis();
   }
 
-  // --- Send image for prediction every 5 seconds (example) ---
-  static unsigned long lastPrediction = 0;
-  const unsigned long predictionInterval = 5000; // 5 seconds
-  if (WiFi.status() == WL_CONNECTED && currentMillis - lastPrediction > predictionInterval) {
-    sendImageForPrediction();
-    lastPrediction = currentMillis;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected. Reconnecting...");
+    WiFi.begin(ssid, password);
   }
 }

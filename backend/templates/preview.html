@@ -221,7 +221,7 @@
                 socket = io(`http://{{ server_ip }}:5000`, {
                     transports: ['websocket'],
                     upgrade: false,
-                    query: { cart_id: 'cart_001' }, // CHANGED from 'preview_cart' to 'cart_001'
+                    query: { cart_id: 'preview_cart' },
                     reconnection: true,
                     reconnectionAttempts: 5,
                     reconnectionDelay: 1000,
@@ -284,4 +284,4 @@
         });
     </script>
 </body>
-</html>
+</html> 

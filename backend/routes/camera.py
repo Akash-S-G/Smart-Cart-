@@ -18,12 +18,10 @@ camera = Blueprint('camera', __name__)
 connected_carts = {}
 
 # Load the product detection model
-MODEL_PATH = 'ml_models/weights/product_model3_finetuned.h5'
 try:
-    model = tf.keras.models.load_model(MODEL_PATH)
-    print(f"Loaded AI model from {MODEL_PATH}")
-except Exception as e:
-    print(f"Warning: Product detection model not found at {MODEL_PATH}. Creating a placeholder model. Error: {e}")
+    model = tf.keras.models.load_model('models/product_detection_model.h5')
+except:
+    print("Warning: Product detection model not found. Creating a placeholder model.")
     # Create a simple placeholder model
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(224, 224, 3)),
@@ -90,7 +88,7 @@ def detect_products(img):
     
     # Get predictions
     predictions = model.predict(img)[0]
-    max_pred_idx = int(np.argmax(predictions))
+    max_pred_idx = np.argmax(predictions)
     confidence = float(predictions[max_pred_idx])
     
     if confidence > 0.7:  # Confidence threshold
@@ -126,16 +124,6 @@ def connect_cart():
         'status': 'connected'
     })
 
-@camera.route('/ws_auth', methods=['POST'])
-def ws_auth():
-    data = request.get_json(force=True)
-    cart_id = data.get('cart_id')
-    if not cart_id:
-        return jsonify({'error': 'Cart ID required'}), 400
-    # You can add more authentication logic here if needed
-    emit('connection_confirmed', {'status': 'connected', 'cart_id': cart_id, 'type': 'esp32'}, broadcast=True)
-    return jsonify({'message': 'ESP32 authenticated', 'cart_id': cart_id})
-
 def handle_frame(data):
     """Handle incoming frame from ESP32"""
     cart_id = data.get('cart_id')
@@ -164,4 +152,4 @@ def handle_frame(data):
         emit('product_detected', {
             'cart_id': cart_id,
             'detections': detections
-        }, broadcast=True)
+        }, broadcast=True) 

@@ -1,4 +1,7 @@
 import eventlet
+# Disable eventlet DNS monkey patching to fix Gemini API DNS errors on Windows
+# See: https://github.com/eventlet/eventlet/issues/401
+# This allows requests to use the system DNS resolver
 eventlet.monkey_patch()
 
 
